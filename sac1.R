@@ -5,52 +5,52 @@
 library(igraph)
 library(lsa)
 
-# Reading the data from the files:
-g <- read.graph(file = "/Users/ADITYA/BI/Projects/Project6/data/fb_caltech_small_edgelist.txt", format = c("edgelist"))
-attrList <- read.csv("/Users/ADITYA/BI/Projects/Project6/data/fb_caltech_small_attrlist.csv", header = TRUE)
+graph=read_graph("/Users/ADITYA/BI/Projects/Project6/data/fb_caltech_small_edgelist.txt",format= c("edgelist"))
+attribute_data <- read.csv("/Users/ADITYA/BI/Projects/Project6/data/fb_caltech_small_attrlist.csv",header = TRUE)
 
-# Taking Command Line Input
-args <- commandArgs(trailingOnly = TRUE)
-alpha=as.numeric(args[1])
+setwd("/Users/ADITYA/BI/Projects/Project6/")
 
-cosine_update <- function(k, memebership, values, attribute)
+# Cosine function for finding the modularity
+cosine_update <- function(attrList, h, membership, values)
 {
-  indices=which(values==memebership)
-  sim=0
+  indices <- which(values == membership)
+  similar <- 0
   for(i in indices)
   {
-    sim=sim+cosine(as.numeric(attribute[k,]),as.numeric(attribute[i,]))
+    similar <- similar + cosine(as.numeric(attrList[h,]), as.numeric(attrList[i,]))
   }
-  
-  sim <- sim/length(indices)
-  
+  similar <- similar/length(indices)
 }
 
-phase1 <- function(g, alpha){
-  
-  mapped_values <- 1:vcount(g)
-  
-  for(k in 1:15)
+
+#Phase 1 of Sac1 Algorithm
+
+phase1 <- function(graph, mapped_values, alpha, attributes){
+  for(h in 1:15)
   {
-    x = mapped_values
-    for(i in 1:vcount(g))
+    x <- mapped_values
+    for(i in 1:vcount(graph))
     {
       
       index <- 0
-      maxValue <- 0
-      n <- neighbors(g, i)
+      max <- 0
+      
+      n <- neighbors(graph, i)
       for(j in unique(mapped_values[n]))
       {
-        community <- mapped_values
-        oldModularity <- modularity(g, community)
-        community[i]=j
-        newModularity <- modularity(g, community)
         
-        modularity_gain <- (alpha)*(newModularity - oldModularity) + (1-alpha)*(cosine_update(i, j, mapped_values, attrList))
+        membership_prime <- mapped_values
+        oldMod <- modularity(graph,membership_prime)
+        membership_prime[i] <- j
+        newMod <- modularity(graph,membership_prime)
         
-        if(i!=j && modularity_gain > maxValue){
+        delta_Q_newman <- newMod - oldMod
+        delta_Q_attr <- cosine_update(attributes, i, j, mapped_values)
+        delta_Q <- (1-alpha)*delta_Q_attr + (alpha)*delta_Q_newman
+        
+        if(i!=j && delta_Q > max){
           index <- j
-          maxValue <- modularity_gain
+          max <- delta_Q
         }
       }
       if(index !=0){
@@ -58,57 +58,80 @@ phase1 <- function(g, alpha){
       }
       
     }
-    if(isTRUE(all.equal(x,mapped_values)))
+    if(isTRUE(all.equal(x, mapped_values)))
     {
       break
     }
     x <- mapped_values
     
   }
-  return(mapped_values)
+  mapped_values  
 }
 
-
-phase2 <- function(alphaValue, community_mapped){
-  oldMember <- community_mapped
-  for(h in 1:15)
+#Phase2 of sac1 algorithm
+phase2 <- function(graph, mapped_values, alpha, attributes){
+  
+  x <- mapped_values
+  for(i in 1:15)
   {
-    g2 <- contract.vertices(g, oldMember)
-    g3 <- simplify(g2, remove.multiple = TRUE, remove.loops = TRUE)
-    community_mapped <- phase1(g3, alphaValue, community_mapped)
-    if(isTRUE(all.equal(oldMember, community_mapped)))
+    graph_prime <- contract.vertices(graph, mapped_values)
+    
+    graph_prime_1 <- simplify(graph_prime, remove.multiple = TRUE, remove.loops = TRUE)
+    
+    mapped_values <- phase1(graph_prime_1, mapped_values, alpha, attributes)
+    
+    if(isTRUE(all.equal(x, mapped_values)))
     {
       break
     }
-    oldMember <- community_mapped
+    
+    x <- mapped_values
   }
-  return(community_mapped)
+  
+  mapped_values
 }
 
-sac1 <- function(alphaVal){
-  mapped_communities <- phase1(g,alpha=alphaVal)
-  mapped_communities <- phase2(alphaValue = alphaVal, mapped_communities)
+
+#By changing the value of alpha we can get different communities
+sac1 <- function(alpha, attributes = attribute_data){
+  mapped_communities <- phase1(graph, alpha=alpha, mapped_values = c(1:324), attributes)
   
-  # Writing Data into the files
+  mapped_communities <- phase2(graph, alpha=alpha, mapped_values = mapped_communities, attributes)
   
-  fileName<-paste("communities",alphaVal,sep="_")
+  return(mapped_communities)
+}
+
+fileWrite <- function(mappedCommunity, alpha){
+  
+  fileName<-paste("communities",alpha,sep="_")
   fileName<-paste(fileName,"txt",sep=".")
-  fileDes<-file(fileName,"w")
+  fileConnection<-file(fileName,"w")
   
-  for(i in 1:length(unique(mapped_communities))-1)
+  for(i in 1:length(unique(mappedCommunity)))
   {
-    finalComm <- vector("numeric")
-    for(j in 1:vcount(g))
+    community <- vector("numeric")
+    for(j in 1:324)
     {
-      if(mapped_communities[j]==unique(mapped_communities)[i]){
-        finalComm <- append(finalComm,j,after = length(finalComm))
+      if(mappedCommunity[j]==unique(mappedCommunity)[i]){
+        
+        community <- append(community, j-1, after = length(community))
+        
       }
     }
-    cat(as.character(finalComm), file=fileDes,sep = ",")
-    cat("\n", file=fileDes)
+    cat(as.character(community), file=fileConnection, sep = ",")
+    cat("\n", file=fileConnection)
   }
-  close(fileDes)
+  
+  close(fileConnection)
   
 }
 
-sac1(alphaVal = alpha)
+
+args <- commandArgs(trailingOnly = TRUE)
+alpha = as.numeric(args[1])
+
+# Running SAC1 Algorithm
+mappedComunity <- sac1(alpha = alpha)
+fileWrite(mappedComunity, alpha = alpha)
+
+# Discussed with Anshuman Goel and Ayush Kumar for project
